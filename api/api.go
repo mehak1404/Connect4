@@ -7,7 +7,8 @@ import (
 	"strconv"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
-
+	"time"
+	"log"
 	"connect4/db"
 	"connect4/games"
 )
@@ -52,8 +53,18 @@ func GetPlayers(w http.ResponseWriter, r *http.Request) {
 	respondWithJSON(w, http.StatusOK, players)
 }
 
+func GetGames(w http.ResponseWriter, r *http.Request) {
+	games, err := db.ListGame()
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Error retrieving games")
+		return
+	}
+	
+	respondWithJSON(w, http.StatusOK, games)
+}
 // CreatePlayer creates a new player
 func CreatePlayer(w http.ResponseWriter, r *http.Request) {
+	log.Println("CreatePlayer")
 	var player games.Player
 	
 	decoder := json.NewDecoder(r.Body)
@@ -92,6 +103,7 @@ func GetPlayer(w http.ResponseWriter, r *http.Request) {
 
 // GetLeaderboard returns the player leaderboard
 func GetLeaderboard(w http.ResponseWriter, r *http.Request) {
+	log.Println("GetLeaderboard")
 	limitStr := r.URL.Query().Get("limit")
 	limit := 10 // Default limit
 	
@@ -116,6 +128,8 @@ func GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 // Game handlers
 // CreateGame creates a new game
 func CreateGame(w http.ResponseWriter, r *http.Request) {
+
+	log.Println("CreateGame")
 	var requestData struct {
 		GameType  games.GameType `json:"gameType"`
 		Player1ID string        `json:"player1Id"`
@@ -136,7 +150,8 @@ func CreateGame(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusBadRequest, "Invalid game type")
 		return
 	}
-	
+	log.Println(requestData.GameType)
+
 	// Set default player IDs for single player mode
 	if requestData.GameType == games.SinglePlayer && requestData.Player2ID == "" {
 		requestData.Player2ID = "bot"
@@ -144,8 +159,8 @@ func CreateGame(w http.ResponseWriter, r *http.Request) {
 	
 	// Make sure player IDs are provided for multiplayer
 	if requestData.GameType == games.OnlineMultiplayer && 
-	  (requestData.Player1ID == "" || requestData.Player2ID == "") {
-		respondWithError(w, http.StatusBadRequest, "Both player IDs required for online multiplayer")
+	  (requestData.Player1ID == "") {
+		respondWithError(w, http.StatusBadRequest, "Player1 Id required for online multiplayer")
 		return
 	}
 	
@@ -153,14 +168,23 @@ func CreateGame(w http.ResponseWriter, r *http.Request) {
 	newGame := games.NewGame(requestData.GameType, requestData.Player1ID, requestData.Player2ID)
 	
 	// Start the game immediately
-	newGame.Status = games.StatusActive
+	
+	if requestData.GameType == games.OnlineMultiplayer && requestData.Player2ID == "" {
+		// Set status to waiting if no Player2 yet
+		newGame.Status = games.StatusWaiting
+	} else {
+		// Otherwise, start the game immediately
+		newGame.Status = games.StatusActive
+	}
+	
 	
 	// Save the game
 	if err := db.CreateGame(newGame); err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Error creating game")
 		return
 	}
-	
+	log.Printf("Game type : %v", games.SinglePlayer)
+	log.Printf("Sending response to client : %v", newGame)
 	respondWithJSON(w, http.StatusCreated, newGame)
 }
 
@@ -230,6 +254,7 @@ func MakeMove(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		
+		
 		// Save the game state
 		if err := db.SaveGame(currentGame); err != nil {
 			respondWithError(w, http.StatusInternalServerError, "Error saving game after bot move")
@@ -238,8 +263,141 @@ func MakeMove(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	// Broadcast game update to WebSocket clients
-	db.BroadcastGameState(gameID, currentGame)
+	//db.BroadcastGameState(gameID, currentGame)
 	
 	// Return the updated game
 	respondWithJSON(w, http.StatusOK, currentGame)
+}
+
+func ResetGame(w http.ResponseWriter, r *http.Request) {
+    vars := mux.Vars(r)
+    gameID := vars["id"]
+    log.Printf("Resetting game: %v", gameID)
+    // Get the game
+    currentGame, err := db.GetGame(gameID)
+    if err != nil {
+        respondWithError(w, http.StatusNotFound, "Game not found")
+        return
+    }
+	// Give first turn to the winner, or alternate if it was a draw
+	if currentGame.WinnerID != "" {
+		if currentGame.WinnerID == currentGame.Player1ID {
+			currentGame.CurrentTurn = games.RedToken
+		} else {
+			
+			currentGame.CurrentTurn = games.YellowToken
+		}
+	} else {
+		// If it was a draw, alternate starting player
+		currentGame.CurrentTurn = games.RedToken
+		
+	}
+    // Reset the game state
+    currentGame.Board = games.NewBoard()
+     
+    currentGame.Status = games.StatusActive
+    currentGame.WinnerID = ""
+    currentGame.LastMoveTime = time.Now()
+
+	if currentGame.Player1ID == "bot" || currentGame.Player2ID == "bot" {
+        
+        if currentGame.Player1ID == "bot" {
+            currentGame.Bot.PlayerID = currentGame.Player1ID
+            currentGame.Bot.PlayerToken = games.RedToken
+            currentGame.Bot.OpponentToken = games.YellowToken
+            
+            
+        } else {
+            currentGame.Bot.PlayerID = currentGame.Player2ID
+            currentGame.Bot.PlayerToken = games.YellowToken
+            currentGame.Bot.OpponentToken = games.RedToken
+        }
+
+		if currentGame.CurrentTurn == games.YellowToken {
+            botColumn := currentGame.Bot.GetNextMove(currentGame)
+			
+            log.Printf("Bot move: %d", botColumn)
+            // Apply bot move
+            if err := currentGame.MakeMove(currentGame.Player2ID, botColumn); err != nil {
+                respondWithError(w, http.StatusInternalServerError, "Bot move error: "+err.Error())
+                return
+            }
+			
+			currentGame.CurrentTurn = games.RedToken
+		}
+		if err := db.SaveGame(currentGame); err != nil {
+			respondWithError(w, http.StatusInternalServerError, "Error saving reset game")
+			return
+		}
+		
+		// Broadcast game update to WebSocket clients
+		//db.BroadcastGameState(gameID, currentGame)
+		
+		// Return the reset game
+		respondWithJSON(w, http.StatusOK, currentGame)
+    }
+}
+
+func MatchMaking(w http.ResponseWriter, r *http.Request) {
+    // Parse player ID from request
+    var request struct {
+        PlayerID string `json:"playerId"`
+    }
+    
+    if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+        respondWithError(w, http.StatusBadRequest, "Invalid request format")
+        return
+    }
+    
+    
+    gamelist, err := db.ListGame()
+    if err != nil {
+        respondWithError(w, http.StatusInternalServerError, "Error retrieving games")
+        return
+    }
+    
+    // Look for a game waiting for a second player
+    for _, game := range gamelist {
+        if game.Type == games.OnlineMultiplayer && 
+           game.Status == games.StatusWaiting && 
+           game.Player1ID != request.PlayerID && 
+           game.Player2ID == "" {
+            
+            // Found a game to join
+            game.Player2ID = request.PlayerID
+            game.Status = games.StatusActive
+            
+            if err := db.SaveGame(game); err != nil {
+                respondWithError(w, http.StatusInternalServerError, "Error updating game")
+                return
+            }
+            
+            // Return the matched game
+            response := map[string]interface{}{
+                "status":    "matched",
+                "gameId":    game.ID,
+                "player1Id": game.Player1ID,
+                "player2Id": game.Player2ID,
+            }
+            
+            json.NewEncoder(w).Encode(response)
+            return
+        }
+    }
+    
+    // No waiting games found, create a new one
+    newGame := games.NewGame(games.OnlineMultiplayer, request.PlayerID, "")
+    if err := db.SaveGame(newGame); err != nil {
+        respondWithError(w, http.StatusInternalServerError, "Error creating game")
+        return
+    }
+    
+    // Return the waiting game
+    response := map[string]interface{}{
+        "status":    games.StatusWaiting,
+        "gameId":    newGame.ID,
+        "player1Id": newGame.Player1ID,
+    }
+    
+    json.NewEncoder(w).Encode(response)
 }

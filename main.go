@@ -34,27 +34,39 @@ func main() {
 	router.HandleFunc("/api/leaderboard", api.GetLeaderboard).Methods("GET")
 	
 	router.HandleFunc("/api/games", api.CreateGame).Methods("POST")
+	router.HandleFunc("/api/games", api.GetGames).Methods("GET")
 	router.HandleFunc("/api/games/{id}", api.GetGame).Methods("GET")
+	router.HandleFunc("/api/games/{id}", api.GetGame).Methods("Put")
 	router.HandleFunc("/api/games/{id}/move", api.MakeMove).Methods("POST")
-	
+	router.HandleFunc("/api/games/{id}/reset", api.ResetGame).Methods("POST")
+	router.HandleFunc("/api/matchmaking", api.MatchMaking).Methods("POST")
+
 	// WebSocket endpoint for real-time gameplay
 	router.HandleFunc("/ws/game/{id}", handleGameWebSocket)
 	
 	// Start the server
-	log.Println("Starting server on :8080")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	log.Println("Starting server on :9000")
+	log.Fatal(http.ListenAndServe(":9000", router))
 }
 
 func handleGameWebSocket(w http.ResponseWriter, r *http.Request) {
+	log.Printf("Received WebSocket connection attempt from: %s", r.RemoteAddr)
+    
 	vars := mux.Vars(r)
 	gameID := vars["id"]
 	
+	
 	conn, err := upgrader.Upgrade(w, r, nil)
+	// conn.CheckOrigin = func(r *http.Request) bool {
+    //     return true // Accept all connections for testing
+    // }
 	if err != nil {
 		log.Println("Failed to upgrade connection:", err)
 		return
 	}
-	
+	defer conn.Close()
+	log.Printf("WebSocket connection established with: %s", r.RemoteAddr)
+    
 	// Register this connection with our game manager
 	api.RegisterGameConnection(gameID, conn)
 	

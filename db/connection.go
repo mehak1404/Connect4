@@ -18,6 +18,7 @@ const (
 	TypeGameState MessageType = "gameState"
 	TypeMove MessageType = "move"
 	TypeError MessageType = "error"
+	TypeJoinGame MessageType = "joinGame"
 
 )
 
@@ -73,6 +74,7 @@ func RemoveGameConnection(gameID string, conn *websocket.Conn){
 
 // this function handle the websocket msg, for typegamestate messages, defined earlier
 func BroadcastGameState(gameID string, game *games.Game){
+	log.Printf("Broadcasting game state for game: %s", gameID)
 	connMutex.Lock()
 	conns := connections[gameID]
 	defer connMutex.Unlock()
@@ -105,7 +107,9 @@ func BroadcastGameState(gameID string, game *games.Game){
 // function to process all the incoming messages for a game
 
 func HandleConnection(gameID string, conn *websocket.Conn){
+	log.Printf("Starting HandleConnection for game: %s", gameID)
 
+	log.Printf("Handling connection for game: %s", gameID) 
 	defer func ()  {
 		conn.Close()
 		RemoveGameConnection(gameID, conn)
@@ -118,7 +122,7 @@ func HandleConnection(gameID string, conn *websocket.Conn){
 		return nil
 	})
 
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	// this ticker will keep the connection alive -- pinging after 30 seconds interval, 
 	// 
@@ -161,7 +165,7 @@ func HandleConnection(gameID string, conn *websocket.Conn){
 				log.Printf("Error unmarshaling move : %v", err)
 				continue
 			}
-
+			log.Printf("Received move from player %s: %v", move.PlayerID, move)
 			//now we have the move, so we make the move
 			if err := game.MakeMove(move.PlayerID, move.Column); err != nil{
 				
@@ -189,8 +193,45 @@ func HandleConnection(gameID string, conn *websocket.Conn){
 			if game.Status == games.StatusFinished{
 				updatePlayerStats(game)
 			}
+
+		case TypeJoinGame:
+			var joinRequest struct {
+				PlayerID string `json:"playerId"`
+			}
+			if err := json.Unmarshal(message.Payload, &joinRequest); err != nil {
+				log.Printf("Error unmarshaling join request: %v", err)
+				continue
+			}
+			
+			// Update the game with the second player
+			game.Player2ID = joinRequest.PlayerID
+			game.Status = games.StatusActive
+			
+			log.Printf("Player %s joined game %s", joinRequest.PlayerID, gameID)
+			
+			// Save the updated game
+			if err := SaveGame(game); err != nil {
+				log.Printf("Error saving game after join: %v", err)
+				
+				// Send error response
+				errMsg := ErrorMessage{Error: "Failed to save game after join"}
+				errJson, _ := json.Marshal(errMsg)
+				response := Message{
+					Type: TypeError,
+					Payload: errJson,
+				}
+				responseJson, _ := json.Marshal(response)
+				conn.WriteMessage(websocket.TextMessage, responseJson)
+				continue
+			}
+			
+			// Broadcast the updated game state to all clients
+			BroadcastGameState(gameID, game)
 		}
+		
+		
 	}
+
 
 }
 

@@ -49,13 +49,17 @@ func NewPlayer(Username string) * Player {
 	
 }
 
-// NewGame creates a new game with an empty board
-func NewGame(gameType GameType, player1ID, player2ID string) *Game {
-	// Initialize empty board
+func NewBoard() [][]int {
 	board := make([][]int, BoardHeight)
 	for i := range board {
 		board[i] = make([]int, BoardWidth)
 	}
+	return board
+}
+// NewGame creates a new game with an empty board
+func NewGame(gameType GameType, player1ID, player2ID string) *Game {
+	// Initialize empty board
+	board := NewBoard()
 
 	game := &Game{
 		ID:          generateGameID(),
