@@ -43,6 +43,7 @@ func main() {
 
 	// WebSocket endpoint for real-time gameplay
 	router.HandleFunc("/ws/game/{id}", handleGameWebSocket)
+	router.HandleFunc("/ws/", handleGlobalConnection);
 	
 	// Start the server
 	log.Println("Starting server on :9000")
@@ -64,7 +65,7 @@ func handleGameWebSocket(w http.ResponseWriter, r *http.Request) {
 		log.Println("Failed to upgrade connection:", err)
 		return
 	}
-	defer conn.Close()
+	
 	log.Printf("WebSocket connection established with: %s", r.RemoteAddr)
     
 	// Register this connection with our game manager
@@ -72,4 +73,20 @@ func handleGameWebSocket(w http.ResponseWriter, r *http.Request) {
 	
 	// Handle incoming WebSocket messages
 	go db.HandleConnection(gameID, conn)
+}
+func handleGlobalConnection(w http.ResponseWriter, r *http.Request) {
+    log.Printf("Received WebSocket connection attempt from: %s", r.RemoteAddr)
+    
+    conn, err := upgrader.Upgrade(w, r, nil)
+    if err != nil {
+        log.Println("Failed to upgrade connection:", err)
+        return
+    }
+    
+    // REMOVE THE defer conn.Close() HERE
+    
+    log.Printf("WebSocket connection established with: %s", r.RemoteAddr)
+    
+    // Let the db.HandleGlobalConnection function manage the connection lifecycle
+    db.HandleGlobalConnection(conn)
 }

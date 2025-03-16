@@ -41,6 +41,9 @@ func RegisterGameConnection(gameID string, conn *websocket.Conn) {
 	db.RegisterGameConnection(gameID, conn)
 }
 
+func RegisterGlobalConnection(conn *websocket.Conn) {
+	db.RegisterGlobalConnection(conn)
+}
 // Player handlers
 // GetPlayers returns all players
 func GetPlayers(w http.ResponseWriter, r *http.Request) {
