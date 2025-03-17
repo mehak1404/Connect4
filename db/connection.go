@@ -308,7 +308,7 @@ func HandleConnection(gameID string, conn *websocket.Conn){
             log.Printf("Player %s requested game reset, waiting for confirmation from %s", 
                       resetRequest.PlayerID, otherPlayerID)
             
-            // Broadcast reset request to all connections for this game
+            // Broadcast reset request other player for this game
             BroadcastResetRequest(gameID, otherPlayerID, resetRequest.PlayerID)
 		case TypeResetConfirm:
             // Handle reset confirmation from the other player
@@ -406,7 +406,7 @@ func BroadcastResetRequest(gameID string, otherPlayerID string, requestingPlayer
     
     payload, _ := json.Marshal(resetRequestData)
     message := Message{
-        Type: "resetRequest",
+        Type: "requestReset",
         Payload: payload,
     }
     

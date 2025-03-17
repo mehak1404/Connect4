@@ -15,7 +15,7 @@ var (
 	playerMutex = &sync.RWMutex{}
 )
 
-func Initialize() error {
+func Initialize() error{
 	return nil
 }
 
